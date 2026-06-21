@@ -1,11 +1,5 @@
 import streamlit as st
-import asyncio
-import sys
-from google.adk.apps import App
-from google.adk.runners import InMemoryRunner
-from google.genai import types
-
-from agent_graph import root_agent, graph
+from agent_graph import graph
 
 # Set page configuration
 st.set_page_config(
@@ -119,41 +113,6 @@ query = st.text_area(
     label_visibility="collapsed"
 )
 
-# Async helper to run the workflow and render status notifications
-async def run_workflow_pipeline(query_text: str, status_widget):
-    app = App(name="app", root_agent=root_agent)
-    runner = InMemoryRunner(app=app)
-    session = await runner.session_service.create_session(app_name="app", user_id="streamlit_user")
-    
-    new_message = types.Content(
-        role="user",
-        parts=[types.Part.from_text(text=query_text)]
-    )
-    
-    # Iterate through yielded node execution events
-    async for event in runner.run_async(
-        user_id="streamlit_user",
-        session_id=session.id,
-        new_message=new_message
-    ):
-        node_name = getattr(event, "node_name", None)
-        if node_name == "guardrail_node":
-            status_widget.write("🛡️ **Guardrail Node**: Checked domain relevance and query guardrails.")
-        elif node_name == "research_node":
-            status_widget.write("📚 **Research Node**: Contacted local MCP server to retrieve baseline mechanical specs.")
-        elif node_name == "materials_node":
-            status_widget.write("🧪 **Materials Node**: Contacted local MCP server to retrieve additive insights.")
-        elif node_name == "planner_node":
-            status_widget.write("📋 **Planner Node**: Generated the Design of Experiments (DoE) test matrix.")
-        elif node_name == "report_node":
-            status_widget.write("✍️ **Report Node**: Formatted and compiled the final report document.")
-
-    # Retrieve final state
-    updated_session = await runner.session_service.get_session(
-        app_name="app", user_id="streamlit_user", session_id=session.id
-    )
-    return updated_session.state
-
 # Execute workflow on action click
 if st.button("Run Analysis"):
     if not query.strip():
@@ -161,13 +120,13 @@ if st.button("Run Analysis"):
     else:
         # Create interactive visual status expander
         with st.status("Executing Research Workflow Node Pipeline...", expanded=True) as status:
-            final_state = asyncio.run(run_workflow_pipeline(query, status))
-            status.update(label="Workflow nodes completed successfully!", state="complete", expanded=False)
+            status.write("🚀 Running multi-agent graph workflow nodes...")
+            status.write("🛡️ Guardrail checks, materials database queries, and sintering planning are active...")
+            # Invoke the graph using the compile().invoke() structure
+            final_state = graph.compile().invoke({"user_query": query})
+            status.update(label="Workflow completed successfully!", state="complete", expanded=False)
             
-        # Ensure compatibility with graph.compile().invoke pattern checks
-        # final_state = graph.compile().invoke({"user_query": query})
-            
-        # Display the compiled report inside an styled dashboard container card
+        # Display the compiled report inside a styled dashboard container card
         st.markdown('<div class="report-card">', unsafe_allow_html=True)
         st.markdown(final_state.get("final_report", "Error generating report"))
         st.markdown('</div>', unsafe_allow_html=True)

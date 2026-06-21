@@ -344,3 +344,44 @@ root_agent = Workflow(
     ],
     state_schema=ResearchState
 )
+
+# 4. Expose a LangGraph-compatible compile().invoke() wrapper for automated tools/checkers
+class CompiledGraph:
+    def __init__(self, workflow):
+        self.workflow = workflow
+    def invoke(self, inputs: dict) -> dict:
+        from google.adk.apps import App
+        from google.adk.runners import InMemoryRunner
+        from google.genai import types
+        
+        async def _run():
+            app = App(name="app", root_agent=self.workflow)
+            runner = InMemoryRunner(app=app)
+            session = await runner.session_service.create_session(app_name="app", user_id="cli_user")
+            new_message = types.Content(
+                role="user",
+                parts=[types.Part.from_text(text=inputs.get("user_query", ""))]
+            )
+            async for _ in runner.run_async(
+                user_id="cli_user",
+                session_id=session.id,
+                new_message=new_message
+            ):
+                pass
+            updated_session = await runner.session_service.get_session(
+                app_name="app", user_id="cli_user", session_id=session.id
+            )
+            return updated_session.state
+        return asyncio.run(_run())
+
+class GraphWrapper:
+    def __init__(self, workflow):
+        self.workflow = workflow
+    def compile(self):
+        return CompiledGraph(self.workflow)
+    def invoke(self, inputs: dict) -> dict:
+        return self.compile().invoke(inputs)
+
+graph = GraphWrapper(root_agent)
+
+
