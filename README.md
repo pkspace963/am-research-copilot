@@ -61,8 +61,8 @@ graph TD
     GuardrailNode --> ResearchNode[2. Research Node]
     ResearchNode --> MaterialsNode[3. Materials Node]
     MaterialsNode --> PlannerNode[4. Planner Node]
-    PlannerNode --> ReportNode[5. Report Node (Synthesis)]
-    ReportNode --> END([END])
+    PlannerNode --> ReportNode5[5. Report Node Synthesis]
+    ReportNode5 --> END([END])
 ```
 
 ### 2.1 Shared Session State (`ResearchState`)
@@ -206,7 +206,7 @@ To calculate the financial impact for an advanced manufacturing laboratory, use 
 
 $$\text{Annual Labor Savings} = \left( \text{Number of Projects/Year} \times \text{Hours Saved/Project} \times \text{Hourly Researcher Rate} \right)$$
 
-$$\text{Annual Scrap & Material Savings} = \left( \text{Failed Prints Avoided/Year} \times \text{Cost per Zirconia Run} \right)$$
+$$\text{Annual Scrap and Material Savings} = \left( \text{Failed Prints Avoided/Year} \times \text{Cost per Zirconia Run} \right)$$
 
 #### Savings Estimates:
 
