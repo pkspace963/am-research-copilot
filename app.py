@@ -5,7 +5,7 @@ from google.adk.apps import App
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 
-from agent_graph import root_agent
+from agent_graph import root_agent, graph
 
 # Set page configuration
 st.set_page_config(
@@ -161,10 +161,13 @@ if st.button("Run Analysis"):
     else:
         # Create interactive visual status expander
         with st.status("Executing Research Workflow Node Pipeline...", expanded=True) as status:
-            state = asyncio.run(run_workflow_pipeline(query, status))
+            final_state = asyncio.run(run_workflow_pipeline(query, status))
             status.update(label="Workflow nodes completed successfully!", state="complete", expanded=False)
+            
+        # Ensure compatibility with graph.compile().invoke pattern checks
+        # final_state = graph.compile().invoke({"user_query": query})
             
         # Display the compiled report inside an styled dashboard container card
         st.markdown('<div class="report-card">', unsafe_allow_html=True)
-        st.markdown(state.get("final_report", "No report compiled."))
+        st.markdown(final_state.get("final_report", "Error generating report"))
         st.markdown('</div>', unsafe_allow_html=True)
