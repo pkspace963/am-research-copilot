@@ -1,5 +1,36 @@
 # AM Research Copilot: Autonomous Multi-Agent Design Optimization for Advanced Dental Ceramics
 
+```
+           +-----------------------+
+           |         START         |
+           +-----------+-----------+
+                       |
+                       v
+           +-----------+-----------+
+           |    Guardrail Node     |  (Input Validation & Relevance Check)
+           +-----------+-----------+
+                       |
+                       v
+           +-----------+-----------+
+           |     Research Node     |  (Queries Y-TZP Baseline Properties)
+           +-----------+-----------+
+                       |
+                       v
+           +-----------+-----------+
+           |    Materials Node     |  (Queries Additive/Dopant Insights)
+           +-----------+-----------+
+                       |
+                       v
+           +-----------+-----------+
+           |     Planner Node      |  (Synthesizes Experimental DoE)
+           +-----------+-----------+
+                       |
+                       v
+           +-----------+-----------+
+           |      Report Node      |  (Compiles Engineering Report)
+           +-----------------------+
+```
+
 ## 1. Executive Summary & Engineering Problem Statement
 
 ### 1.1 Executive Summary
