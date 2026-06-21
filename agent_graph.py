@@ -61,6 +61,43 @@ def detects_high_toughness_request(query: str) -> bool:
         
     return False
 
+# Helper function to call the Google GenAI SDK (Gemini) with exponential backoff
+def generate_content_gemini(prompt: str) -> str:
+    import time
+    from google import genai
+    from google.genai.errors import APIError
+    
+    max_retries = 3
+    delay = 2.0
+    client = genai.Client()
+    
+    for attempt in range(max_retries):
+        try:
+            # Using gemini-2.5-flash which is the active high-quota model in this workspace
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt
+            )
+            return response.text.strip()
+        except APIError as e:
+            # Retry on rate limits (429) or transient server errors (503)
+            if e.code in [429, 503] and attempt < max_retries - 1:
+                print(f"Transient Gemini API error {e.code} (attempt {attempt+1}/{max_retries}). Retrying in {delay}s...", file=sys.stderr)
+                time.sleep(delay)
+                delay *= 2
+            else:
+                print(f"Gemini API Error: {e}", file=sys.stderr)
+                raise e
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"Generic error (attempt {attempt+1}/{max_retries}). Retrying in {delay}s...", file=sys.stderr)
+                time.sleep(delay)
+                delay *= 2
+            else:
+                print(f"Gemini API Error: {e}", file=sys.stderr)
+                raise e
+
+
 # Helper function to invoke tools from the MCP server
 async def call_mcp_tool(tool_name: str, arguments: dict = None) -> str:
     """
@@ -78,50 +115,35 @@ async def call_mcp_tool(tool_name: str, arguments: dict = None) -> str:
                 raise ValueError(response.content[0].text)
             return response.content[0].text
 
-# Helper function to compute the Research Gap Analysis focusing on thermal conflicts
-def compute_research_gap_analysis(material: str, high_toughness: bool) -> str:
-    gap_text = "## 5. Research Gap Analysis: Thermal Processing-Window Conflicts\n"
-    
-    if "zirconia" in material.lower():
-        gap_text += """
-* **Sintering Temperature Incompatibility**: Y-TZP Zirconia densifies optimally around 1500°C. However, adding Alumina ($Al_2O_3$) to improve hydrothermal aging resistance requires higher temperatures (~1550°C - 1600°C) for full densification. Raising the temperature to accommodate alumina leads to rapid grain growth in the Y-TZP matrix, which reduces the transformation toughening capability and makes the zirconia more susceptible to low-temperature degradation (LTD).
-* **Atmospheric Sintering Conflicts**: While zirconia requires an oxidizing atmosphere to maintain its oxygen stoichiometry, co-doping with certain elements or metallic components requires vacuum or reducing environments (e.g., hydrogen gas) to prevent oxidation, which in turn causes oxygen vacancies and destabilization of the tetragonal zirconia phase.
-"""
-        if high_toughness:
-            gap_text += """
-* **Nanoparticle Burnout vs. Zirconia Sintering**: The injection of Graphene or CNTs for high-toughness requirements introduces a major thermal processing gap. Carbon-based reinforcements burn out in oxidizing atmospheres at temperatures above 450°C. However, sintering zirconia requires oxygen to prevent reduction. Sintering in inert/reducing conditions to preserve CNTs/Graphene yields sub-stoichiometric zirconia ($ZrO_{2-x}$), which exhibits degraded mechanical properties and poor dental aesthetics.
-"""
-    elif "alumina" in material.lower():
-        gap_text += """
-* **ZTA Sintering Trade-Offs**: Sintering Alumina Bioceramics requires temperatures of 1600°C. In Zirconia-Toughened Alumina (ZTA), this high thermal energy causes significant grain growth of both the alumina matrix and the zirconia dispersoids. If the zirconia grains exceed the critical size (~1 µm), they undergo spontaneous tetragonal-to-monoclinic transformation upon cooling rather than remaining metastable. This defeats the stress-induced transformation toughening mechanism at room temperature.
-"""
-    elif "steel" in material.lower() or "stainless" in material.lower():
-        gap_text += """
-* **Binder Burnout vs. Metal Oxidation**: 316L Stainless Steel printed green bodies require debinding under hydrogen or vacuum to prevent carbon retention (which causes chromium carbide precipitation and sensitizes the steel to corrosion). Ceramics, by contrast, require oxygen for clean binder burnout. Co-processing metals with oxide ceramics is heavily constrained by this atmospheric conflict.
-* **Thermal Expansion Mismatch**: 316L Stainless Steel has a high coefficient of thermal expansion (CTE) of approximately $16 \times 10^{-6}/\text{K}$, whereas zirconia and alumina are around $7-10 \times 10^{-6}/\text{K}$. Sintering hybrid materials across these windows causes massive residual stresses during the cooling phase, leading to interfacial delamination and cracking.
-"""
-    return gap_text
-
-# 2. Define the Agent Nodes
+# 2. Define the Agent Nodes using live Gemini SDK generation
 
 @node
 def guardrail_node(ctx: Context, node_input: Any) -> Event:
     """
     Checks if the user query is related to manufacturing or materials.
-    Sets 'domain_valid' in the shared state.
+    Sets 'domain_valid' in the shared state using Gemini validation.
     """
     query = get_text_from_input(node_input)
     
-    # Manufacturing, zirconia, metals, or general materials keywords
-    keywords = [
-        "zirconia", "y-tzp", "ceramic", "sintering", "debinding", 
-        "dlp", "print", "manufacturing", "additive", "mfg", 
-        "material", "properties", "toughness", "flexural", "alumina", "ceria",
-        "steel", "stainless", "316l", "metal", "alloy", "bioceramic"
-    ]
+    prompt = f"""
+    You are an expert manufacturing guardrail. Determine if the user query is about advanced manufacturing, materials science (ceramics, metals, polymers), 3D printing, sintering, or dental applications.
+    User Query: "{query}"
     
-    domain_valid = any(kw in query.lower() for kw in keywords)
-    
+    Respond with ONLY 'TRUE' or 'FALSE'. Do not add any other text.
+    """
+    try:
+        ans = generate_content_gemini(prompt)
+        domain_valid = "TRUE" in ans.upper()
+    except Exception:
+        # Fallback to simple keyword check if API fails
+        keywords = [
+            "zirconia", "y-tzp", "ceramic", "sintering", "debinding", 
+            "dlp", "print", "manufacturing", "additive", "mfg", 
+            "material", "properties", "toughness", "flexural", "alumina", "ceria",
+            "steel", "stainless", "316l", "metal", "alloy", "bioceramic"
+        ]
+        domain_valid = any(kw in query.lower() for kw in keywords)
+        
     return Event(
         output=query,
         state={
@@ -134,7 +156,7 @@ def guardrail_node(ctx: Context, node_input: Any) -> Event:
 async def research_node(ctx: Context, node_input: Any) -> Event:
     """
     Retrieves baseline mechanical properties and DLP print parameters
-    if the query is verified as domain-valid.
+    if the query is verified as domain-valid, utilizing Gemini to formulate research notes.
     """
     domain_valid = ctx.state.get("domain_valid", False)
     user_query = ctx.state.get("user_query", "")
@@ -144,10 +166,18 @@ async def research_node(ctx: Context, node_input: Any) -> Event:
             # Determine targeted material dynamically
             material_name = detect_material(user_query)
             # Query the baseline properties from the MCP server
-            baselines = await call_mcp_tool("get_material_baselines", {"material_name": material_name})
+            baselines_raw = await call_mcp_tool("get_material_baselines", {"material_name": material_name})
+            
+            prompt = f"""
+            You are a materials science researcher. Given the user query: "{user_query}" and the following verified database baseline properties:
+            {baselines_raw}
+            
+            Dynamically generate a detailed research summary of the baseline mechanical properties (flexural strength, fracture toughness) and Recommended DLP printing/sintering parameters. Do not hallucinate any values outside the provided data.
+            """
+            research_notes = generate_content_gemini(prompt)
             return Event(
-                output=baselines,
-                state={"research_notes": baselines}
+                output=research_notes,
+                state={"research_notes": research_notes}
             )
         except Exception as e:
             error_msg = f"Failed to retrieve material baselines: {str(e)}"
@@ -165,8 +195,8 @@ async def research_node(ctx: Context, node_input: Any) -> Event:
 async def materials_node(ctx: Context, node_input: Any) -> Event:
     """
     Retrieves pros, cons, and typical concentration ranges of common
-    toughness additives using the MCP server to aid material selection.
-    Appends Graphene/CNT composite reinforcement if high toughness is requested.
+    toughness additives using the MCP server to aid material selection,
+    utilizing Gemini to analyze the trade-offs.
     """
     domain_valid = ctx.state.get("domain_valid", False)
     user_query = ctx.state.get("user_query", "")
@@ -183,8 +213,9 @@ async def materials_node(ctx: Context, node_input: Any) -> Event:
             except Exception:
                 additives = {}
             
+            high_toughness = detects_high_toughness_request(user_query)
             # Adaptive Routing: Inject advanced composite parameters for high fracture toughness requests
-            if detects_high_toughness_request(user_query):
+            if high_toughness:
                 additives["Graphene Nanoplatelets (GNPs) / Carbon Nanotubes (CNTs)"] = {
                     "typical_concentration_range": "0.1 wt% - 1.0 wt%",
                     "pros": [
@@ -200,10 +231,16 @@ async def materials_node(ctx: Context, node_input: Any) -> Event:
                     "reinforcement_alignment": "Requires magnetic or electric field alignment during DLP print layer exposure to align CNTs perpendicular to crack propagation plane."
                 }
             
-            additives_json = json.dumps(additives, indent=2, ensure_ascii=False)
+            prompt = f"""
+            You are a materials selection agent. Given the user query: "{user_query}" and the additive insights from our database:
+            {json.dumps(additives, indent=2)}
+            
+            Dynamically generate a comparative analysis of the additives, their concentration ranges, and their pros/cons for this material application. If high toughness is requested, synthesize the trade-offs of using Graphene/CNT composite reinforcement and field alignment.
+            """
+            materials_analysis = generate_content_gemini(prompt)
             return Event(
-                output=additives_json,
-                state={"materials_chosen": additives_json}
+                output=materials_analysis,
+                state={"materials_chosen": materials_analysis}
             )
         except Exception as e:
             error_msg = f"Failed to retrieve additive insights: {str(e)}"
@@ -220,10 +257,11 @@ async def materials_node(ctx: Context, node_input: Any) -> Event:
 @node
 def planner_node(ctx: Context, node_input: Any) -> Event:
     """
-    Creates a Design of Experiments (DoE) test matrix for evaluating additives.
+    Creates a Design of Experiments (DoE) test matrix for evaluating additives using Gemini.
     """
     domain_valid = ctx.state.get("domain_valid", False)
-    user_query = ctx.state.get("user_query", "")
+    research_notes = ctx.state.get("research_notes", "")
+    materials_chosen = ctx.state.get("materials_chosen", "")
     
     if not domain_valid:
         return Event(
@@ -231,55 +269,19 @@ def planner_node(ctx: Context, node_input: Any) -> Event:
             state={"experimental_matrix": "Skipped (out of domain)"}
         )
         
-    material_name = detect_material(user_query)
-    high_toughness = detects_high_toughness_request(user_query)
+    prompt = f"""
+    You are an experimental planning agent. Given the material research notes:
+    "{research_notes}"
     
-    # Customize the DoE matrix depending on the material and toughness requirement
-    if "zirconia" in material_name.lower():
-        doe_matrix = f"""
-### Proposed Design of Experiments (DoE) Matrix (Y-TZP Zirconia)
-
-To evaluate the influence of additive type, concentration, layer thickness, and sintering temperature:
-
-| Run | Additive Type | Concentration | Layer Thickness (µm) | Sintering Temp (°C) | Dwell Time (min) | Primary Objective |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **1 (Control)** | None | 0.0 wt% | 30 | 1500 | 120 | Establish baseline properties |
-| **2** | Alumina (Al2O3) | 0.05 wt% | 20 | 1500 | 120 | Optimize fine feature resolution |
-| **3** | Alumina (Al2O3) | 0.25 wt% | 50 | 1550 | 120 | Investigate high-concentration limit |
-| **4** | Ceria (CeO2) | 8.0 mol% | 20 | 1450 | 120 | Test low-temperature sintering |
-| **5** | Ceria (CeO2) | 12.0 mol% | 50 | 1500 | 120 | Maximize transformation toughening |
-"""
-        if high_toughness:
-            doe_matrix += """| **6** | Graphene/CNTs | 0.5 wt% | 30 | 1500 (Argon/Inert) | 120 | Evaluate carbon composite reinforcement & alignment |
-"""
-        else:
-            doe_matrix += """| **6** | Alumina + Ceria | 0.1% + 10% | 30 | 1500 | 120 | Test synergistic co-doping effects |
-"""
-            
-    elif "alumina" in material_name.lower():
-        doe_matrix = """
-### Proposed Design of Experiments (DoE) Matrix (Alumina Bioceramics)
-
-Evaluating Zirconia-Toughened Alumina (ZTA) parameters:
-
-| Run | Additive Type | Concentration | Layer Thickness (µm) | Sintering Temp (°C) | Dwell Time (min) | Primary Objective |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **1 (Control)** | None | 0.0 wt% | 40 | 1600 | 120 | Pure alumina baseline |
-| **2** | Zirconia (ZrO2) | 10.0 wt% | 30 | 1600 | 120 | ZTA toughness evaluation |
-| **3** | Zirconia (ZrO2) | 20.0 wt% | 50 | 1550 | 180 | Evaluate lower temp / longer dwell ZTA |
-"""
-    else:  # Stainless steel
-        doe_matrix = """
-### Proposed Design of Experiments (DoE) Matrix (316L Stainless Steel)
-
-Evaluating metal printing and sintering under vacuum/hydrogen parameters:
-
-| Run | Additive Type | Concentration | Layer Thickness (µm) | Sintering Temp (°C) | Atmosphere | Primary Objective |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **1 (Control)** | None | 0.0 wt% | 50 | 1360 | High Vacuum | Baseline printed steel density |
-| **2** | Nickel (Ni) | 12.0 wt% | 30 | 1360 | Dry Hydrogen | Austenitic stability evaluation |
-| **3** | Nickel (Ni) | 14.0 wt% | 50 | 1340 | Argon Shield | Evaluate alternative sintering gas |
-"""
+    And materials chosen/analyzed:
+    "{materials_chosen}"
+    
+    Compose a unique Design of Experiments (DoE) matrix in a clean markdown table. The DoE should test variables like layer thickness, sintering temperature, and additives. Return ONLY the markdown table. Do not add introductory or concluding text.
+    """
+    try:
+        doe_matrix = generate_content_gemini(prompt)
+    except Exception as e:
+        doe_matrix = f"Error generating DoE matrix: {e}"
 
     return Event(
         output=doe_matrix,
@@ -311,86 +313,19 @@ def report_node(ctx: Context, node_input: Any) -> Event:
             state={"final_report": report_content}
         )
 
-    # Parse baseline properties data
+    prompt = f"""
+    You are a principal engineer compiling a final research report.
+    User Query: {user_query}
+    Research Notes: {research_notes}
+    Additives Chosen: {materials_chosen}
+    DoE Matrix: {experimental_matrix}
+    
+    Compile everything into a beautiful, detailed, professional markdown report. You MUST include a dedicated section titled '## 5. Research Gap Analysis: Thermal Processing-Window Conflicts' that analyzes the specific thermodynamic/sintering conflicts for this material and its additives (e.g., grain growth vs. densification temperatures, oxidation of carbon reinforcements, or thermal expansion mismatch). Structure the report professionally.
+    """
     try:
-        baselines = json.loads(research_notes)
-    except Exception:
-        baselines = {}
-
-    # Parse additive details
-    try:
-        additives = json.loads(materials_chosen)
-    except Exception:
-        additives = {}
-
-    material_name = baselines.get("material", "Unknown Material")
-    mech_props = baselines.get("baseline_mechanical_properties", {})
-    ft = mech_props.get("fracture_toughness", {})
-    fs = mech_props.get("flexural_strength", {})
-    dlp = baselines.get("dlp_print_parameters", {})
-    lt = dlp.get("layer_thickness", {})
-    sintering = dlp.get("sintering_temperature_profile", {})
-
-    high_toughness = detects_high_toughness_request(user_query)
-
-    # Generate the formatted Markdown report
-    report_content = f"""# Advanced Manufacturing & Sintering Analysis Report
-
-**Original Query:** {user_query}
-**Domain Verification Status:** PASSED ({material_name} Applications)
-
----
-
-## 1. Baseline Mechanical Properties ({material_name})
-* **Fracture Toughness:** {ft.get('value_range', [3.0, 10.0])[0]} - {ft.get('value_range', [3.0, 10.0])[1]} {ft.get('unit', 'MPa·m^(1/2)')}
-  * *Test Method:* {ft.get('method', 'N/A')}
-* **Flexural Strength:** {fs.get('value_range', [400, 1200])[0]} - {fs.get('value_range', [400, 1200])[1]} {fs.get('unit', 'MPa')}
-  * *Test Method:* {fs.get('method', 'N/A')}
-
----
-
-## 2. Recommended DLP Print Parameters
-* **Layer Thickness Range:** {lt.get('range', [20, 75])[0]} - {lt.get('range', [20, 75])[1]} {lt.get('unit', 'microns')}
-* **Recommended Thickness:** {lt.get('recommended', 30)} {lt.get('unit', 'microns')}
-
-### Sintering Temperature Profile
-"""
-    for stage in sintering.get("stages", []):
-        report_content += f"""
-### Stage: {stage.get('stage_name')}
-* **Ramp Rate:** {stage.get('ramp_rate')} {stage.get('ramp_rate_unit')}
-* **Target Temp:** {stage.get('target_temperature')}{stage.get('temperature_unit')}
-* **Dwell Time:** {stage.get('dwell_time')} {stage.get('dwell_time_unit')}
-* *Purpose/Details:* {stage.get('description')}
-"""
-
-    report_content += "\n---\n\n## 3. Toughness Additives & Modification Analysis\n"
-    for name, details in additives.items():
-        pros_list = "\n".join(f"  * {p}" for p in details.get("pros", []))
-        cons_list = "\n".join(f"  * {c}" for c in details.get("cons", []))
-        align = details.get("reinforcement_alignment")
-        
-        report_content += f"""
-### {name}
-* **Typical Concentration:** {details.get('typical_concentration_range')}
-* **Pros:**
-{pros_list}
-* **Cons:**
-{cons_list}
-"""
-        if align:
-            report_content += f"* **Alignment requirements:** {align}\n"
-
-    report_content += f"""
----
-
-## 4. Proposed Design of Experiments (DoE)
-{experimental_matrix}
-
----
-
-{compute_research_gap_analysis(material_name, high_toughness)}
-"""
+        report_content = generate_content_gemini(prompt)
+    except Exception as e:
+        report_content = f"Error compiling final report: {e}"
 
     return Event(
         output=report_content,
