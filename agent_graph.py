@@ -63,13 +63,14 @@ def detects_high_toughness_request(query: str) -> bool:
 
 # Helper function to call the Google GenAI SDK (Gemini) with exponential backoff
 def generate_content_gemini(prompt: str) -> str:
+    import os
     import time
     from google import genai
     from google.genai.errors import APIError
     
     max_retries = 3
     delay = 2.0
-    client = genai.Client()
+    client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
     
     for attempt in range(max_retries):
         try:
