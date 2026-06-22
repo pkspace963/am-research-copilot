@@ -91,6 +91,8 @@ def generate_content_gemini(prompt: str, user_query: str = "") -> str:
                 else:
                     material = "zirconia"
                 
+                state = prompt
+                prompt_lower = state.user_query.lower() if hasattr(state, 'user_query') else str(state).lower()
                 if "guardrail" in prompt_lower or "determine if the user query is about" in prompt_lower:
                     return "TRUE"
                 
