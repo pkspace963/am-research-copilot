@@ -122,8 +122,8 @@ if st.button("Run Analysis"):
         with st.status("Executing Research Workflow Node Pipeline...", expanded=True) as status:
             status.write("🚀 Running multi-agent graph workflow nodes...")
             status.write("🛡️ Guardrail checks, materials database queries, and sintering planning are active...")
-            # Invoke the graph using the compile().invoke() structure
-            final_state = graph.compile().invoke({"user_query": query})
+            # Invoke the graph using the invoke() structure
+            final_state = graph.invoke({"user_query": query})
             status.update(label="Workflow completed successfully!", state="complete", expanded=False)
             
         # Display the compiled report inside a styled dashboard container card

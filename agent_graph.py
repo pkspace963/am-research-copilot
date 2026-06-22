@@ -382,6 +382,8 @@ class GraphWrapper:
     def invoke(self, inputs: dict) -> dict:
         return self.compile().invoke(inputs)
 
-graph = GraphWrapper(root_agent)
+workflow = GraphWrapper(root_agent)
+graph = workflow.compile()
+
 
 
