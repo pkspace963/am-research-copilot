@@ -73,9 +73,9 @@ def generate_content_gemini(prompt: str) -> str:
     
     for attempt in range(max_retries):
         try:
-            # Using gemini-1.5-flash which is the active high-quota model in this workspace
+            # Using gemini-2.5-flash which is the active high-quota model in this workspace
             response = client.models.generate_content(
-                model="gemini-1.5-flash",
+                model="gemini-2.5-flash",
                 contents=prompt
             )
             return response.text.strip()
