@@ -82,9 +82,11 @@ def generate_content_gemini(prompt: str) -> str:
         except APIError as e:
             # Retry on rate limits (429) or transient server errors (503)
             if e.code in [429, 503] and attempt < max_retries - 1:
-                print(f"Transient Gemini API error {e.code} (attempt {attempt+1}/{max_retries}). Retrying in {delay}s...", file=sys.stderr)
-                time.sleep(delay)
-                delay *= 2
+                # If 429 rate limit is encountered on the first attempt, sleep 35s to reset the quota window
+                current_delay = 35.0 if (e.code == 429 and attempt == 0) else delay
+                print(f"Transient Gemini API error {e.code} (attempt {attempt+1}/{max_retries}). Retrying in {current_delay}s...", file=sys.stderr)
+                time.sleep(current_delay)
+                delay = current_delay * 2
             else:
                 print(f"Gemini API Error: {e}", file=sys.stderr)
                 raise e
