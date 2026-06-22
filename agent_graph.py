@@ -62,7 +62,7 @@ def detects_high_toughness_request(query: str) -> bool:
     return False
 
 # Helper function to call the Google GenAI SDK (Gemini) with exponential backoff
-def generate_content_gemini(prompt: str) -> str:
+def generate_content_gemini(prompt: str, user_query: str = "") -> str:
     import os
     import time
     from google import genai
@@ -83,11 +83,11 @@ def generate_content_gemini(prompt: str) -> str:
         except APIError as e:
             if e.code == 429:
                 print(f"Caught 429 RESOURCE_EXHAUSTED. Activating local fallback mechanism...", file=sys.stderr)
-                prompt_lower = prompt.lower()
-                if "alumina" in prompt_lower:
-                    material = "alumina"
-                elif "stainless" in prompt_lower or "316l" in prompt_lower:
+                query_lower = user_query.lower()
+                if "steel" in query_lower or "316l" in query_lower:
                     material = "stainless"
+                elif "alumina" in query_lower or "al2o3" in query_lower:
+                    material = "alumina"
                 else:
                     material = "zirconia"
                 
@@ -304,7 +304,7 @@ def guardrail_node(ctx: Context, node_input: Any) -> Event:
     Respond with ONLY 'TRUE' or 'FALSE'. Do not add any other text.
     """
     try:
-        ans = generate_content_gemini(prompt)
+        ans = generate_content_gemini(prompt, query)
         domain_valid = "TRUE" in ans.upper()
     except Exception:
         # Fallback to simple keyword check if API fails
@@ -346,7 +346,7 @@ async def research_node(ctx: Context, node_input: Any) -> Event:
             
             Dynamically generate a detailed research summary of the baseline mechanical properties (flexural strength, fracture toughness) and Recommended DLP printing/sintering parameters. Do not hallucinate any values outside the provided data.
             """
-            research_notes = generate_content_gemini(prompt)
+            research_notes = generate_content_gemini(prompt, user_query)
             return Event(
                 output=research_notes,
                 state={"research_notes": research_notes}
@@ -409,7 +409,7 @@ async def materials_node(ctx: Context, node_input: Any) -> Event:
             
             Dynamically generate a comparative analysis of the additives, their concentration ranges, and their pros/cons for this material application. If high toughness is requested, synthesize the trade-offs of using Graphene/CNT composite reinforcement and field alignment.
             """
-            materials_analysis = generate_content_gemini(prompt)
+            materials_analysis = generate_content_gemini(prompt, user_query)
             return Event(
                 output=materials_analysis,
                 state={"materials_chosen": materials_analysis}
@@ -434,6 +434,7 @@ def planner_node(ctx: Context, node_input: Any) -> Event:
     domain_valid = ctx.state.get("domain_valid", False)
     research_notes = ctx.state.get("research_notes", "")
     materials_chosen = ctx.state.get("materials_chosen", "")
+    user_query = ctx.state.get("user_query", "")
     
     if not domain_valid:
         return Event(
@@ -451,7 +452,7 @@ def planner_node(ctx: Context, node_input: Any) -> Event:
     Compose a unique Design of Experiments (DoE) matrix in a clean markdown table. The DoE should test variables like layer thickness, sintering temperature, and additives. Return ONLY the markdown table. Do not add introductory or concluding text.
     """
     try:
-        doe_matrix = generate_content_gemini(prompt)
+        doe_matrix = generate_content_gemini(prompt, user_query)
     except Exception as e:
         doe_matrix = f"Error generating DoE matrix: {e}"
 
@@ -495,7 +496,7 @@ def report_node(ctx: Context, node_input: Any) -> Event:
     Compile everything into a beautiful, detailed, professional markdown report. You MUST include a dedicated section titled '## 5. Research Gap Analysis: Thermal Processing-Window Conflicts' that analyzes the specific thermodynamic/sintering conflicts for this material and its additives (e.g., grain growth vs. densification temperatures, oxidation of carbon reinforcements, or thermal expansion mismatch). Structure the report professionally.
     """
     try:
-        report_content = generate_content_gemini(prompt)
+        report_content = generate_content_gemini(prompt, user_query)
     except Exception as e:
         report_content = f"Error compiling final report: {e}"
 
