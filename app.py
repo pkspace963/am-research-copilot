@@ -98,7 +98,7 @@ st.markdown("""
 # Header section
 st.markdown("""
 <div class="title-banner">
-    <h1>AM Research Copilot</h1>
+    <h1>Additive Manufacturing Optimization for Ceramic with Metal Additives</h1>
     <p>Autonomous Research Workflow orchestrating ADK 2.0 Graphs & MCP Manufacturing Databases</p>
 </div>
 """, unsafe_allow_html=True)

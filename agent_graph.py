@@ -62,10 +62,11 @@ def detects_high_toughness_request(query: str) -> bool:
     return False
 
 # Helper function to call the Google GenAI SDK (Gemini) with exponential backoff
-def generate_content_gemini(prompt: str, user_query: str = "") -> str:
+def generate_content_gemini(prompt: str, user_query: str = "", enable_search: bool = False) -> str:
     import os
     import time
     from google import genai
+    from google.genai import types
     from google.genai.errors import APIError
     
     max_retries = 3
@@ -75,10 +76,19 @@ def generate_content_gemini(prompt: str, user_query: str = "") -> str:
     for attempt in range(max_retries):
         try:
             # Using gemini-2.5-flash which is the active high-quota model in this workspace
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt
-            )
+            if enable_search:
+                response = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        tools=[{"google_search": {}}]
+                    )
+                )
+            else:
+                response = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=prompt
+                )
             return response.text.strip()
         except APIError as e:
             if e.code == 429:
@@ -348,7 +358,7 @@ async def research_node(ctx: Context, node_input: Any) -> Event:
             
             Dynamically generate a detailed research summary of the baseline mechanical properties (flexural strength, fracture toughness) and Recommended DLP printing/sintering parameters. Do not hallucinate any values outside the provided data.
             """
-            research_notes = generate_content_gemini(prompt, user_query)
+            research_notes = generate_content_gemini(prompt, user_query, enable_search=True)
             return Event(
                 output=research_notes,
                 state={"research_notes": research_notes}
@@ -411,7 +421,7 @@ async def materials_node(ctx: Context, node_input: Any) -> Event:
             
             Dynamically generate a comparative analysis of the additives, their concentration ranges, and their pros/cons for this material application. If high toughness is requested, synthesize the trade-offs of using Graphene/CNT composite reinforcement and field alignment.
             """
-            materials_analysis = generate_content_gemini(prompt, user_query)
+            materials_analysis = generate_content_gemini(prompt, user_query, enable_search=True)
             return Event(
                 output=materials_analysis,
                 state={"materials_chosen": materials_analysis}
@@ -498,7 +508,7 @@ def report_node(ctx: Context, node_input: Any) -> Event:
     Compile everything into a beautiful, detailed, professional markdown report. You MUST include a dedicated section titled '## 5. Research Gap Analysis: Thermal Processing-Window Conflicts' that analyzes the specific thermodynamic/sintering conflicts for this material and its additives (e.g., grain growth vs. densification temperatures, oxidation of carbon reinforcements, or thermal expansion mismatch). Structure the report professionally.
     """
     try:
-        report_content = generate_content_gemini(prompt, user_query)
+        report_content = generate_content_gemini(prompt, user_query, enable_search=True)
     except Exception as e:
         report_content = f"Error compiling final report: {e}"
 
